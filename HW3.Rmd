@@ -1,0 +1,346 @@
+
+---
+title: "Rene Guerra - Homework 3"
+output: pdf_document
+date: 'Sunday, October 30th 2022'
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r include= FALSE}
+
+library(tidyverse)
+library(tidymodels)
+library(ggplot2)
+library(readr)
+library(corrr)
+library(discrim)
+library(klaR)
+library(pROC)
+tidymodels_prefer()
+
+```
+
+```{r include= FALSE}
+
+Titanic <- read_csv("Titanic.csv")
+
+```
+
+```{r}
+
+Titanic$survived <- factor(Titanic$survived, levels= c('Yes', 'No'))
+Titanic$pclass <- factor(Titanic$pclass)
+
+levels(Titanic$survived)
+
+```
+
+**1**
+
+```{r}
+
+set.seed(2022)
+
+Titanic_split <- initial_split(Titanic, prop= 0.80, strata= survived)
+
+Titanic_train <- training(Titanic_split)
+Titanic_train
+
+Titanic_test <- testing(Titanic_split)
+Titanic_test
+
+```
+
+It is a good idea to use stratified sampling for this data because the sample comes from all categories and is divided into subcategories that will potentially derive different results for the outcome variable we are evaluating.
+
+
+**2**
+
+```{r}
+
+Titanic_train %>%
+  ggplot(aes(x= survived)) + geom_bar()
+
+```
+
+Most people did not survive based on the training data set.
+
+
+**3**
+
+```{r}
+
+is.numeric(Titanic$passenger_id)
+is.numeric(Titanic$survived)
+is.numeric(Titanic$pclass)
+is.numeric(Titanic$name)
+is.numeric(Titanic$sex)
+is.numeric(Titanic$age)
+is.numeric(Titanic$sib_sp)
+is.numeric(Titanic$parch)
+is.numeric(Titanic$ticket)
+is.numeric(Titanic$fare)
+is.numeric(Titanic$cabin)
+is.numeric(Titanic$embarked)
+
+```
+
+
+```{r}
+
+Cor_Titanic <- Titanic_train %>%
+  select(-c(survived, pclass, name, sex, ticket, cabin, embarked)) %>%
+  correlate()
+rplot(Cor_Titanic)
+
+Cor_Titanic %>%
+  stretch() %>%
+  ggplot(aes(x, y, fill= r)) +
+  geom_tile() +
+  geom_text(aes(label= as.character(fashion(r))))
+
+
+```
+The main pattern I see is the negative correlation between sib_sp and age.
+The correlation matrix shows that older passengers were not accompanied by 
+siblings and younger passengers did not have spouses.
+Another significant negative correlation is parch and age. Older passengers
+did not have parents on board and younger passengers were not accompanied by 
+children. On the other hand, sib_sp and parch have a significantly positive
+correlation.
+This means that most children and siblings had parents aboard,
+thus there were families.
+
+
+**4**
+
+```{r}
+
+Titanic_recipe <- recipe(survived ~ pclass + sex + age + sib_sp + parch + fare, Titanic_train) %>%
+  step_impute_linear(age, impute_with = imp_vars(sib_sp)) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_interact(~ starts_with("sex"):fare + age:fare)
+
+Titanic_recipe
+
+```
+
+```{r warning= FALSE}
+
+Interaction1 <- lm(survived ~ sex + fare, data= Titanic_train)
+Interaction1
+
+Interaction2 <- lm(survived ~ age + fare, data= Titanic_train)
+Interaction2
+
+```
+
+**5**
+
+```{r}
+
+glm_Titanic <- logistic_reg() %>%
+  set_engine(("glm")) %>%
+  set_mode("classification")
+  
+glm_Titanic
+
+```
+
+```{r}
+
+glm_Titanicflow<- workflow() %>%
+  add_model(glm_Titanic) %>%
+  add_recipe(Titanic_recipe)
+
+TitanicFit1 <- fit(glm_Titanicflow, Titanic_train)
+
+TitanicFit1 %>%
+  tidy()
+
+predict(TitanicFit1, new_data = Titanic_train, type= "prob")
+
+augment(TitanicFit1, new_data= Titanic_train) %>%
+  conf_mat(truth= survived, estimate= .pred_class) %>%
+  autoplot(type= "heatmap")
+
+```
+
+```{r}
+
+glm_accuracy <- augment(TitanicFit1, new_data= Titanic_train) %>%
+  accuracy(truth= survived, estimate= .pred_class)
+
+glm_accuracy
+
+```
+
+**6**
+
+```{r}
+
+lda_Titanic <- discrim_linear() %>% 
+  set_engine("MASS") %>%
+  set_mode("classification")
+
+lda_Titanic
+
+```
+
+```{r}
+
+lda_TitanicFlow <- workflow() %>% 
+  add_model(lda_Titanic) %>% 
+  add_recipe(Titanic_recipe)
+
+TitanicFit2 <- fit(lda_TitanicFlow, Titanic_train)
+
+predict(TitanicFit2, new_data = Titanic_train, type= "prob")
+
+augment(TitanicFit2, new_data= Titanic_train) %>%
+  conf_mat(truth= survived, estimate= .pred_class) %>%
+  autoplot(type= "heatmap")
+
+```
+
+```{r}
+
+lda_accuracy <- augment(TitanicFit2, new_data= Titanic_train) %>%
+  accuracy(truth= survived, estimate= .pred_class)
+
+lda_accuracy
+
+```
+
+**7**
+
+```{r}
+
+qda_Titanic <- discrim_quad() %>% 
+  set_engine("MASS") %>%
+  set_mode("classification")
+
+qda_Titanic
+
+```
+
+```{r}
+
+qda_TitanicFlow <- workflow() %>% 
+  add_model(qda_Titanic) %>% 
+  add_recipe(Titanic_recipe)
+
+TitanicFit3 <- fit(qda_TitanicFlow, Titanic_train)
+
+predict(TitanicFit3, new_data = Titanic_train, type= "prob")
+
+augment(TitanicFit3, new_data= Titanic_train) %>%
+  conf_mat(truth= survived, estimate= .pred_class) %>%
+  autoplot(type= "heatmap")
+
+```
+
+```{r}
+
+qda_accuracy <- augment(TitanicFit3, new_data= Titanic_train) %>%
+  accuracy(truth= survived, estimate= .pred_class)
+
+glm_accuracy
+
+```
+
+**8**
+
+```{r}
+
+nB_Titanic <- naive_Bayes() %>% 
+  set_engine("klaR") %>%
+  set_mode("classification") %>%
+  set_args(usekernel= FALSE)
+
+nB_Titanic
+
+```
+
+```{r warning= FALSE}
+
+nB_TitanicFlow <- workflow() %>% 
+  add_model(nB_Titanic) %>% 
+  add_recipe(Titanic_recipe)
+
+TitanicFit4 <- fit(nB_TitanicFlow, Titanic_train)
+
+predict(TitanicFit4, new_data= Titanic_train, type= "prob")
+
+augment(TitanicFit4, new_data= Titanic_train) %>%
+  conf_mat(truth= survived, estimate= .pred_class) %>%
+  autoplot(type= "heatmap")
+
+```
+
+```{r warning= FALSE}
+
+nB_accuracy <- augment(TitanicFit4, new_data= Titanic_train) %>%
+  accuracy(truth= survived, estimate= .pred_class)
+
+nB_accuracy
+
+```
+
+**9**
+
+```{r}
+
+TotalAccurate <- c(glm_accuracy$.estimate, lda_accuracy$.estimate, qda_accuracy$.estimate, nB_accuracy$.estimate)
+
+ModType <- c("Logistic Regression", "LDA", "QDA", "Naive Bayes")
+
+Performance <- tibble(TotalAccurate= TotalAccurate, ModType= ModType)
+
+Performance %>%
+  arrange(-TotalAccurate)
+
+```
+
+The model that achieved the highest accuracy on the training data is
+Logistic Regression with 0.8160112 accuracy.
+
+
+**10**
+
+```{r}
+
+predict(TitanicFit1, new_data= Titanic_test, type= "prob")
+
+augment(TitanicFit1, new_data= Titanic_test) %>%
+  conf_mat(truth= survived, estimate= .pred_class) %>%
+  autoplot(type= "heatmap")
+
+```
+
+```{r}
+
+Add_metric <- metric_set(accuracy, sensitivity, specificity)
+
+augment(TitanicFit1, new_data= Titanic_test) %>%
+  Add_metric(truth= survived, estimate= .pred_class)
+
+```
+
+```{r}
+
+augment(TitanicFit1, new_data= Titanic_test) %>%
+  roc_curve(survived, .pred_No) %>%
+  autoplot()
+
+
+```
+The ROC curve is below the random classifier.
+Bad model for classification of
+variable for no survival. The area under the curve is 0.87
+The training accuracy is 0.8160112.
+The testing accuracy is 0.7988827.
+Accuracy results are not significantly different and it is normal to have a
+higher training accuracy since the model is optimized to train data.
